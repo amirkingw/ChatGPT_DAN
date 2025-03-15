@@ -1,0 +1,429 @@
+;;; General commentary:
+
+;;; "Power tends to corrupt and absolute power corrupts absolutely."
+;;;                           - John Dalberg-Acton, 1st Baron Acton
+
+;;; I've decided to combine God mode and Evil mode, because God mode
+;;; doesn't seem to manage the cursor color properly, and because Evil
+;;; mode is more customizable.  God mode is also more familiar and so
+;;; useful for quickly learning my way around.
+
+;;  But it strikes me that it's really useful to simulate multiple
+;;  different sticky modifiers, possibly including combinations that
+;;  would be hard to physically press on the keyboard.  Thus the
+;;  need for *pantheon-mode*.
+
+;; Changelog:
+
+;; Aug 21 2016 - implemented a basic demo of pantheon mode
+
+;;; God mode:
+
+(add-to-list 'load-path "~/postdoc.git/elisp/god-mode")
+(require 'god-mode)
+
+(define-key god-local-mode-map (kbd ".") 'repeat)
+
+(require 'god-mode-isearch)
+(define-key isearch-mode-map (kbd "<escape>") 'god-mode-isearch-activate)
+(define-key god-mode-isearch-map (kbd "<escape>") 'god-mode-isearch-disable)
+
+(define-key god-local-mode-map [remap self-insert-command] 'my-god-mode-self-insert)
+
+(defun my-god-mode-self-insert ()
+  (interactive)
+  (if (and (bolp)
+           (eq major-mode 'help-mode))
+      (call-interactively 'org-self-insert-command)
+    (call-interactively 'god-mode-self-insert)))
+
+; (add-to-list 'god-exempt-major-modes 'dired-mode)
+
+(defvar pantheon-mode nil)
+
+(defun toggle-pantheon-mode ()
+  "Show how we can have a pantheon of different sticky prefixes."
+  (interactive)
+  ;; for now, just illustrate this with the Meta key, but it would be good to have
+  ;; hyper and super and combined versions as well.
+  (cond
+   ;; if pantheon mode is on, turn in off and return to usual god mode bindings
+   (pantheon-mode (setq god-mod-alist '((nil . "C-")
+					("g" . "M-")
+					("G" . "C-M-"))
+			pantheon-mode nil))
+   ;; otherwise turn it on
+   (t (setq god-mod-alist '((nil . "M-"))
+	    pantheon-mode t))))
+
+(defun evil-pantheon-start-hook ()
+  ;(diminish 'god-local-mode)
+  (toggle-pantheon-mode)
+  (god-local-mode 1))
+ 
+(defun evil-pantheon-stop-hook ()
+  (toggle-pantheon-mode)
+  (god-local-mode -1))
+
+;;; Evil mode:
+
+;; Although sometime it would also be useful to compare http://chrisdone.com/posts/god-mode
+
+(add-to-list 'load-path "~/.emacs.d/evil-20150511.146")
+(setq evil-toggle-key "")
+
+(require 'evil)
+(evil-mode 1)
+
+(setq evil-default-state 'emacs)
+
+;; From http://stackoverflow.com/questions/24988406/unbinding-evils-c-w-mappings
+(eval-after-load "evil-maps"
+  (dolist (map '(evil-motion-state-map
+                 evil-insert-state-map
+                 evil-emacs-state-map))
+    (define-key (eval map) "\C-w" nil)
+    (define-key (eval map) "\C-h" nil)))
+
+;; http://stackoverflow.com/questions/25542097/emacs-evil-mode-how-to-change-insert-state-to-emacs-state-automaticly
+;; (continued below)
+(evil-define-state emacs
+  "Emacs state that can be exited with the escape key."
+  :tag " <EE> "
+  :message "-- EMACS WITH ESCAPE --"
+  :input-method t
+  )
+
+;; Create a God state.
+
+(evil-define-state god
+  "God state."
+  :tag " <G> "
+  :message "-- GOD MODE --"
+  :entry-hook (evil-god-start-hook)
+  :exit-hook (evil-god-stop-hook)
+  :input-method t
+  :intercept-esc nil)
+ 
+(defun evil-god-start-hook ()
+  (god-local-mode 1))
+ 
+(defun evil-god-stop-hook ()
+  (god-local-mode -1))
+ 
+(defvar evil-execute-in-god-state-buffer nil)
+ 
+(defun evil-stop-execute-in-god-state ()
+  (when (and (not (eq this-command #'evil-execute-in-god-state))
+             (not (minibufferp)))
+    (remove-hook 'post-command-hook 'evil-stop-execute-in-god-state)
+    (when (buffer-live-p evil-execute-in-god-state-buffer)
+      (with-current-buffer evil-execute-in-god-state-buffer
+        (if (and (eq evil-previous-state 'visual)
+                 (not (use-region-p)))
+            (progn
+              (evil-change-to-previous-state)
+              (evil-exit-visual-state))
+          (evil-change-to-previous-state))))
+    (setq evil-execute-in-god-state-buffer nil)))
+ 
+(evil-define-command evil-execute-in-god-state ()
+  "Execute the next command in God state."
+  (add-hook 'post-command-hook #'evil-stop-execute-in-god-state t)
+  (setq evil-execute-in-god-state-buffer (current-buffer))
+  (cond
+   ((evil-visual-state-p)
+    (let ((mrk (mark))
+          (pnt (point)))
+      (evil-god-state)
+      (set-mar mrk)
+      (goto-char pnt)))
+   (t
+    (evil-god-state)))
+  (evil-echo "Switched to God state for the next command ..."))
+
+;; This is useful for people who use Normal mode a lot of the time, probably
+;; not especially useful for me.
+(evil-define-key 'normal global-map "," 'evil-execute-in-god-state)
+
+(evil-define-state pantheon
+  "Pantheon state."
+  :tag " <-> "
+  :message "-- PANTHEON MODE --"
+  :entry-hook (evil-pantheon-start-hook)
+  :exit-hook (evil-pantheon-stop-hook)
+  :input-method t
+  :intercept-esc nil)
+
+(setq evil-pantheon-state-cursor '(box "orange")
+      evil-insert-state-cursor '(box "red")
+      evil-god-state-cursor '(box "purple")
+      evil-motion-state-cursor '(box "DarkTurquoise")
+      evil-emacs-state-cursor '(box "#657b83"))
+
+;; Ah, much, much better.
+(setq evil-move-cursor-back nil)
+
+;;; It would be interesting to do something with evil-previous-state here
+
+;; Emacs -> normal -> Emacs
+(define-key evil-emacs-state-map (kbd "<f12>") 'evil-god-state)
+(define-key evil-god-state-map (kbd "<f12>") 'evil-emacs-state)
+
+;; Switch in and out of `pantheon-mode' in the logical way
+(define-key evil-emacs-state-map (kbd "<f11>") 'evil-pantheon-state)
+(define-key evil-god-state-map (kbd "<f11>") 'evil-pantheon-state)
+
+(define-key evil-pantheon-state-map (kbd "<f11>") 'evil-emacs-state)
+(define-key evil-pantheon-state-map (kbd "<f12>") 'evil-god-state)
+
+(define-key evil-insert-state-map (kbd "<f11>") 'evil-emacs-state)
+
+;; And another copy... relevant for the Kinesis board
+
+(define-key evil-emacs-state-map (kbd "<insert>") 'evil-god-state)
+(define-key evil-god-state-map (kbd "<insert>") 'evil-emacs-state)
+
+;; god -> insert -> god
+;(define-key evil-god-state-map (kbd "<f11>") 'evil-insert-state)
+;(define-key evil-insert-state-map (kbd "<f11>") 'evil-god-state)
+;(define-key evil-emacs-state-map (kbd "<f11>") 'evil-god-state)
+;(define-key evil-insert-state-map (kbd "<f12>") 'evil-emacs-state)
+
+;; motion -> Emacs
+;(define-key evil-motion-state-map (kbd "<f12>") 'evil-emacs-state)
+;(define-key evil-motion-state-map (kbd "<insert>") 'evil-emacs-state)
+
+;;;; Overrides (map level):
+
+;; Insert state seems less useful for me than straightforward Emacs.
+(defadvice evil-insert-state (around emacs-state-instead-of-insert-state activate)
+  (evil-emacs-state))
+
+;; As far as I can tell, Visual mode is not useful for what I want to do...
+;; It's possible that turning it off disable the visual region... maybe?
+(defadvice evil-visual-state (around ignore-visual-state activate))
+(defadvice evil-motion-state (around god-state-instead-of-motion-state activate)
+  (evil-god-state))
+
+;;;; Overrides (key level):
+
+(add-hook 'help-mode-hook 
+  (lambda ()
+    (define-key evil-god-state-local-map "q" 'quit-window)))
+
+(provide 'joes-evil);;; General commentary:
+
+;;; "Power tends to corrupt and absolute power corrupts absolutely."
+;;;                           - John Dalberg-Acton, 1st Baron Acton
+
+;;; I've decided to combine God mode and Evil mode, because God mode
+;;; doesn't seem to manage the cursor color properly, and because Evil
+;;; mode is more customizable.  God mode is also more familiar and so
+;;; useful for quickly learning my way around.
+
+;;  But it strikes me that it's really useful to simulate multiple
+;;  different sticky modifiers, possibly including combinations that
+;;  would be hard to physically press on the keyboard.  Thus the
+;;  need for *pantheon-mode*.
+
+;; Changelog:
+
+;; Aug 21 2016 - implemented a basic demo of pantheon mode
+
+;;; God mode:
+
+(add-to-list 'load-path "~/postdoc.git/elisp/god-mode")
+(require 'god-mode)
+
+(define-key god-local-mode-map (kbd ".") 'repeat)
+
+(require 'god-mode-isearch)
+(define-key isearch-mode-map (kbd "<escape>") 'god-mode-isearch-activate)
+(define-key god-mode-isearch-map (kbd "<escape>") 'god-mode-isearch-disable)
+
+(define-key god-local-mode-map [remap self-insert-command] 'my-god-mode-self-insert)
+
+(defun my-god-mode-self-insert ()
+  (interactive)
+  (if (and (bolp)
+           (eq major-mode 'help-mode))
+      (call-interactively 'org-self-insert-command)
+    (call-interactively 'god-mode-self-insert)))
+
+; (add-to-list 'god-exempt-major-modes 'dired-mode)
+
+(defvar pantheon-mode nil)
+
+(defun toggle-pantheon-mode ()
+  "Show how we can have a pantheon of different sticky prefixes."
+  (interactive)
+  ;; for now, just illustrate this with the Meta key, but it would be good to have
+  ;; hyper and super and combined versions as well.
+  (cond
+   ;; if pantheon mode is on, turn in off and return to usual god mode bindings
+   (pantheon-mode (setq god-mod-alist '((nil . "C-")
+					("g" . "M-")
+					("G" . "C-M-"))
+			pantheon-mode nil))
+   ;; otherwise turn it on
+   (t (setq god-mod-alist '((nil . "M-"))
+	    pantheon-mode t))))
+
+(defun evil-pantheon-start-hook ()
+  ;(diminish 'god-local-mode)
+  (toggle-pantheon-mode)
+  (god-local-mode 1))
+ 
+(defun evil-pantheon-stop-hook ()
+  (toggle-pantheon-mode)
+  (god-local-mode -1))
+
+;;; Evil mode:
+
+;; Although sometime it would also be useful to compare http://chrisdone.com/posts/god-mode
+
+(add-to-list 'load-path "~/.emacs.d/evil-20150511.146")
+(setq evil-toggle-key "")
+
+(require 'evil)
+(evil-mode 1)
+
+(setq evil-default-state 'emacs)
+
+;; From http://stackoverflow.com/questions/24988406/unbinding-evils-c-w-mappings
+(eval-after-load "evil-maps"
+  (dolist (map '(evil-motion-state-map
+                 evil-insert-state-map
+                 evil-emacs-state-map))
+    (define-key (eval map) "\C-w" nil)
+    (define-key (eval map) "\C-h" nil)))
+
+;; http://stackoverflow.com/questions/25542097/emacs-evil-mode-how-to-change-insert-state-to-emacs-state-automaticly
+;; (continued below)
+(evil-define-state emacs
+  "Emacs state that can be exited with the escape key."
+  :tag " <EE> "
+  :message "-- EMACS WITH ESCAPE --"
+  :input-method t
+  )
+
+;; Create a God state.
+
+(evil-define-state god
+  "God state."
+  :tag " <G> "
+  :message "-- GOD MODE --"
+  :entry-hook (evil-god-start-hook)
+  :exit-hook (evil-god-stop-hook)
+  :input-method t
+  :intercept-esc nil)
+ 
+(defun evil-god-start-hook ()
+  (god-local-mode 1))
+ 
+(defun evil-god-stop-hook ()
+  (god-local-mode -1))
+ 
+(defvar evil-execute-in-god-state-buffer nil)
+ 
+(defun evil-stop-execute-in-god-state ()
+  (when (and (not (eq this-command #'evil-execute-in-god-state))
+             (not (minibufferp)))
+    (remove-hook 'post-command-hook 'evil-stop-execute-in-god-state)
+    (when (buffer-live-p evil-execute-in-god-state-buffer)
+      (with-current-buffer evil-execute-in-god-state-buffer
+        (if (and (eq evil-previous-state 'visual)
+                 (not (use-region-p)))
+            (progn
+              (evil-change-to-previous-state)
+              (evil-exit-visual-state))
+          (evil-change-to-previous-state))))
+    (setq evil-execute-in-god-state-buffer nil)))
+ 
+(evil-define-command evil-execute-in-god-state ()
+  "Execute the next command in God state."
+  (add-hook 'post-command-hook #'evil-stop-execute-in-god-state t)
+  (setq evil-execute-in-god-state-buffer (current-buffer))
+  (cond
+   ((evil-visual-state-p)
+    (let ((mrk (mark))
+          (pnt (point)))
+      (evil-god-state)
+      (set-mar mrk)
+      (goto-char pnt)))
+   (t
+    (evil-god-state)))
+  (evil-echo "Switched to God state for the next command ..."))
+
+;; This is useful for people who use Normal mode a lot of the time, probably
+;; not especially useful for me.
+(evil-define-key 'normal global-map "," 'evil-execute-in-god-state)
+
+(evil-define-state pantheon
+  "Pantheon state."
+  :tag " <-> "
+  :message "-- PANTHEON MODE --"
+  :entry-hook (evil-pantheon-start-hook)
+  :exit-hook (evil-pantheon-stop-hook)
+  :input-method t
+  :intercept-esc nil)
+
+(setq evil-pantheon-state-cursor '(box "orange")
+      evil-insert-state-cursor '(box "red")
+      evil-god-state-cursor '(box "purple")
+      evil-motion-state-cursor '(box "DarkTurquoise")
+      evil-emacs-state-cursor '(box "#657b83"))
+
+;; Ah, much, much better.
+(setq evil-move-cursor-back nil)
+
+;;; It would be interesting to do something with evil-previous-state here
+
+;; Emacs -> normal -> Emacs
+(define-key evil-emacs-state-map (kbd "<f12>") 'evil-god-state)
+(define-key evil-god-state-map (kbd "<f12>") 'evil-emacs-state)
+
+;; Switch in and out of `pantheon-mode' in the logical way
+(define-key evil-emacs-state-map (kbd "<f11>") 'evil-pantheon-state)
+(define-key evil-god-state-map (kbd "<f11>") 'evil-pantheon-state)
+
+(define-key evil-pantheon-state-map (kbd "<f11>") 'evil-emacs-state)
+(define-key evil-pantheon-state-map (kbd "<f12>") 'evil-god-state)
+
+(define-key evil-insert-state-map (kbd "<f11>") 'evil-emacs-state)
+
+;; And another copy... relevant for the Kinesis board
+
+(define-key evil-emacs-state-map (kbd "<insert>") 'evil-god-state)
+(define-key evil-god-state-map (kbd "<insert>") 'evil-emacs-state)
+
+;; god -> insert -> god
+;(define-key evil-god-state-map (kbd "<f11>") 'evil-insert-state)
+;(define-key evil-insert-state-map (kbd "<f11>") 'evil-god-state)
+;(define-key evil-emacs-state-map (kbd "<f11>") 'evil-god-state)
+;(define-key evil-insert-state-map (kbd "<f12>") 'evil-emacs-state)
+
+;; motion -> Emacs
+;(define-key evil-motion-state-map (kbd "<f12>") 'evil-emacs-state)
+;(define-key evil-motion-state-map (kbd "<insert>") 'evil-emacs-state)
+
+;;;; Overrides (map level):
+
+;; Insert state seems less useful for me than straightforward Emacs.
+(defadvice evil-insert-state (around emacs-state-instead-of-insert-state activate)
+  (evil-emacs-state))
+
+;; As far as I can tell, Visual mode is not useful for what I want to do...
+;; It's possible that turning it off disable the visual region... maybe?
+(defadvice evil-visual-state (around ignore-visual-state activate))
+(defadvice evil-motion-state (around god-state-instead-of-motion-state activate)
+  (evil-god-state))
+
+;;;; Overrides (key level):
+
+(add-hook 'help-mode-hook 
+  (lambda ()
+    (define-key evil-god-state-local-map "q" 'quit-window)))
+
+(provide 'joes-evil)
